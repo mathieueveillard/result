@@ -1,57 +1,61 @@
-type MappingFunction<U, V> = (u: U) => Result<V>;
+// --------------- app.ts ---------------
+type DivisionByZeroError = "Division by 0.";
 
-type AbstractResult<Type, U> = {
-  readonly type: Type;
-  readonly bind: <V>(fn: MappingFunction<U, V>) => Result<V>;
-  readonly finally: (onSuccess: (u: U) => void, onError: (error: string) => void) => void;
-};
-
-export type Ok<U> = AbstractResult<"SUCCESS", U> & { readonly value: U };
-
-export type Ko<U> = AbstractResult<"ERROR", U> & { readonly error: string };
-
-export type Result<U> = Ok<U> | Ko<U>;
-
-export const ok = <U>(value: U): Ok<U> => ({
-  type: "SUCCESS",
-  value,
-  bind: <V>(fn: MappingFunction<U, V>) => fn(value),
-  finally: (onSuccess) => {
-    onSuccess(value);
-  },
-});
-
-export const ko = <U>(e: string): Ko<U> => ({
-  type: "ERROR",
-  error: e,
-  bind: <V>() => ko<V>(e),
-  finally: (_, onError) => {
-    onError(e);
-  },
-});
-
-// const divide = (a: number, b: number): number => {
-//   if (b === 0) {
-//     throw Error("Division by 0.");
-//   }
-//   return a / b;
-// };
-
-const divide = (a: number, b: number): Result<number> => {
+const divide = (a: number, b: number): Result<number, DivisionByZeroError> => {
   if (b === 0) {
     return ko("Division by 0.");
   }
   return ok(a / b);
 };
 
-const square = (n: number): Ok<number> => ok(n ** 2);
+const square = (n: number): Result<number, never> => ok(n ** 2);
 
 divide(1, 2).bind(square); // ok(0.25)
 divide(1, 0).bind(square); // ko("Division by 0.")
 
+// ----------- utils/result.ts -----------
+
+type MappingFunction<U, V, F> = (u: U) => Result<V, F>;
+
+type OnSuccess<U> = (u: U) => void;
+
+type OnError<E> = (e: E) => void;
+
+type AbstractResult<Type, U, E> = {
+  readonly type: Type;
+  readonly bind: <V, F>(fn: MappingFunction<U, V, F>) => Result<V, E | F>;
+  readonly finally: (onSuccess: OnSuccess<U>, onError: OnError<E>) => void;
+};
+
+export type Ok<U> = AbstractResult<"SUCCESS", U, never> & { readonly value: U };
+
+export type Ko<E> = AbstractResult<"ERROR", never, E> & { readonly error: E };
+
+export type Result<U, E> = Ok<U> | Ko<E>;
+
+export const ok = <U>(value: U): Ok<U> => ({
+  type: "SUCCESS",
+  value,
+  bind: <V, F>(fn: MappingFunction<U, V, F>) => fn(value),
+  finally: (onSuccess) => {
+    onSuccess(value);
+  },
+});
+
+export const ko = <E>(error: E): Ko<E> => ({
+  type: "ERROR",
+  error,
+  bind: () => ko<E>(error),
+  finally: (_, onError) => {
+    onError(error);
+  },
+});
+
+// --------------- Tests ---------------
+
 test("it should fail in case the user tries to divide by 0", () => {
   const actual = divide(1, 0);
-  expect((actual as Ko<number>).error).toEqual("Division by 0.");
+  expect((actual as Ko<"Division by 0.">).error).toEqual("Division by 0.");
 });
 
 test("it should proceed to actual operation otherwise", () => {
